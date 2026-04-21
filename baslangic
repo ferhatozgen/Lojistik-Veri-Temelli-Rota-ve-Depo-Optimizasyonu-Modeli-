@@ -1,0 +1,9 @@
+Requirements dosyası oluşturularak projede kullanılan kütüphane adları yazılmalıdır. Bu diğer kişilerin gerekli
+kurulumları yapmasını kolaylaştırır.
+Data klasöründe ham ve işlenmiş veriler tutulacaktır.
+Results klasöründe son aşamalarda elde ettiğimiz veriler olacaktır.
+src klasöründe arayüz, model gibi projenin ana kodları olacaktır.
+main dosyasında ise projenin ana kontrolü ve çalıştırılması sağlanacaktır.
+.env dosyası oluşturarak kullanılacaksa api-key, db kullanıcı adı vb bilgiler yazılmalı ve bu dosya .gitignore
+dosyasına eklenerek githuba pushlanması engellenmelidir.
+Geliştirme aşamasında bireysel veya işlev odaklı branchler oluşturularak conflict'ler engellenmelidir.
