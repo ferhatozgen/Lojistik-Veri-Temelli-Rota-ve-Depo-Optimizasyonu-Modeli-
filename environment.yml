@@ -10,3 +10,6 @@ dependencies:
   - seaborn
   - scikit-learn
   - pip
+  - sqlalchemy
+  - psycopg2-binary
+  - pyyaml
