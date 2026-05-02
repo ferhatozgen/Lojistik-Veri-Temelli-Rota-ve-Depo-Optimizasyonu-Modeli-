@@ -1,6 +1,5 @@
 .venv/
 venv/
-results/
 .idea/
 __pycache__/
 .env
