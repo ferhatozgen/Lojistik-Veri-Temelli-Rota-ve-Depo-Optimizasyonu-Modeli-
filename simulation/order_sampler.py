@@ -1,108 +1,136 @@
 import os
-import sys
-import pandas as pd
-import numpy as np
 import random
-from datetime import timedelta
+import numpy as np
+import pandas as pd
 from simulation.district_profiles import DISTRICT_PROFILES
-from src.utils import haversine
-from simulation.demand_engine import get_calendar_features
 
-
+WEATHER_EFFECTS = {0: 1.0, 1: 1.15, 2: 1.35}
 
 def cluster_nodes_by_district(nodes_df):
-    """OSMNX kütüphanesiyle çektiğimiz sokak düğümlerini yazdığımız district merkezine göre gruplar."""
-    district_pools = {district: [] for district in DISTRICT_PROFILES.keys()}
+    """GERÇEK EDİRNE KOORDİNATLARINI AKILLI BİR ŞEKİLDE TEMİZLER VE KULLANIR."""
+    if nodes_df is None:
+        raise ValueError("Kritik Hata: edirne_nodes.csv verisi eksik veya okunamadı!")
 
-    for _, node in nodes_df.iterrows():
-        node_lat, node_lon = node['lat'], node['lon']
+    # 1. Sütun isimlerini küçük harfe çevir ve boşlukları temizle (Büyük/Küçük harf duyarlılığını çözer)
+    nodes_df.columns = nodes_df.columns.str.strip().str.lower()
 
-        # Her noktanın 5 bölge merkezine olan mesafesini hesapla
-        distances = {}
-        for d_name, d_profile in DISTRICT_PROFILES.items():
-            dist = haversine(node_lat, node_lon, d_profile["center"][0], d_profile["center"][1])
-            distances[d_name] = dist
+    # 2. Eğer sütun adı Türkçe 'mahalle' olarak kalmışsa, sisteme uyması için 'district' olarak değiştir
+    if 'mahalle' in nodes_df.columns:
+        nodes_df.rename(columns={'mahalle': 'district'}, inplace=True)
 
-        # En yakın bölgeyi bul ve o bölgenin havuzuna ekle
-        closest_district = min(distances, key=distances.get)
+    # Hâlâ district yoksa içindeki sütunları yazdırarak nerede hata olduğunu bize söylesin
+    if 'district' not in nodes_df.columns:
+        raise ValueError(f"Kritik Hata: edirne_nodes.csv içinde mahalleleri belirten sütun bulunamadı! Mevcut sütunlar: {nodes_df.columns.tolist()}")
 
-        # Eğer çok uç bir noktaysa (örneğin merkeze 4km'den uzaksa) lojistik alan dışı bıraktım
-        if distances[closest_district] <= 4.0:
-            district_pools[closest_district].append((node_lat, node_lon))
+    # 3. İçerikteki mahalle isimlerini standartlaştır (Boşlukları sil, tamamen büyük harf yap)
+    nodes_df['district'] = nodes_df['district'].astype(str).str.strip().str.upper()
 
-    return district_pools
+    # 4. Türkçe Karakterleri İngilizceye çevir (AYŞEKADIN -> AYSEKADIN uyuşmazlığını çözer)
+    replacements = {'Ş': 'S', 'Ç': 'C', 'Ğ': 'G', 'Ü': 'U', 'Ö': 'O', 'İ': 'I'}
+    for tr_char, en_char in replacements.items():
+        nodes_df['district'] = nodes_df['district'].str.replace(tr_char, en_char)
 
+    pools = {}
+    for dist in DISTRICT_PROFILES.keys():
+        # İlgili mahalleye ait koordinatları liste olarak al
+        pools[dist] = nodes_df[nodes_df['district'] == dist][['lat', 'lon']].values.tolist()
+        
+        # Eğer o mahalleye ait hiç koordinat bulamadıysa uyar (Veri kalitesi kontrolü)
+        if not pools[dist]:
+            print(f"⚠️ Uyarı: {dist} mahallesi için edirne_nodes.csv içinde hiç koordinat eşleşmedi!")
 
-def sample_individual_orders(demand_csv_path, nodes_csv_path, output_csv_path):
-    print(" Sipariş Üretim Fabrikası çalıştırılıyor...")
+    return pools
 
-    # Verileri yükle
-    if not os.path.exists(nodes_csv_path) or not os.path.exists(demand_csv_path):
-        print(" Hata: Gerekli kaynak veri dosyaları (nodes veya hourly_demand) bulunamadı!")
-        return
+def get_calendar_features(dt):
+    month, day, year = dt.month, dt.day, dt.year
+    cal = {"is_special_day": 0, "is_semester_break": 0, "is_summer_break": 0, 
+           "exam_engineering": 0, "exam_medicine": 0, "exam_dentistry": 0, "is_prep_week": 0}
+    
+    fixed_specials = [(1, 1), (4, 23), (5, 19), (7, 15), (8, 30), (10, 29), (11, 27)]
+    if (month, day) in fixed_specials or (month == 6 and 23 <= day <= 30): cal["is_special_day"] = 1
+    
+    if (month == 1 and day >= 16 and year == 2026) or (month == 2 and day <= 16 and year == 2026):
+        cal["is_semester_break"] = 1; return cal
+    if (month == 6 and day >= 6 and year == 2025) or (month in [7, 8]) or (month == 9 and day <= 15):
+        cal["is_summer_break"] = 1; return cal
+        
+    # Mühendislik
+    if month == 11 and 8 <= day <= 16: cal["exam_engineering"] = 1
+    elif month == 11 and 1 <= day <= 7: cal["is_prep_week"] = 1
+    if month == 1 and 1 <= day <= 10 and year == 2025: cal["exam_engineering"] = 1
+    elif month == 12 and 24 <= day <= 31 and year == 2024: cal["is_prep_week"] = 1
+    if month == 3 and 24 <= day <= 28 and year == 2025: cal["exam_engineering"] = 1
+    elif month == 3 and 17 <= day <= 23 and year == 2025: cal["is_prep_week"] = 1
+    if year == 2025 and ((month == 5 and day > 25) or (month == 6 and day < 6)): cal["exam_engineering"] = 1
+    elif year == 2025 and (month == 5 and 18 <= day <= 25): cal["is_prep_week"] = 1
+    
+    # Tıp
+    if month == 10 and 21 <= day <= 27 and year == 2025: cal["exam_medicine"] = 1
+    elif month == 10 and 14 <= day <= 20 and year == 2025: cal["is_prep_week"] = 1
+    if month == 12 and 15 <= day <= 21 and year == 2025: cal["exam_medicine"] = 1
+    elif month == 12 and 8 <= day <= 14 and year == 2025: cal["is_prep_week"] = 1
+    if month == 3 and 23 <= day <= 29 and year == 2026: cal["exam_medicine"] = 1
+    elif month == 3 and 16 <= day <= 22 and year == 2026: cal["is_prep_week"] = 1
+    if month == 5 and 12 <= day <= 18 and year == 2026: cal["exam_medicine"] = 1
+    elif month == 5 and 5 <= day <= 11 and year == 2026: cal["is_prep_week"] = 1
+    
+    # Diş Hekimliği
+    if month == 11 and 1 <= day <= 7 and year == 2025: cal["exam_dentistry"] = 1
+    elif month == 10 and 25 <= day <= 31 and year == 2025: cal["is_prep_week"] = 1
+    if month == 1 and 13 <= day <= 19 and year == 2026: cal["exam_dentistry"] = 1
+    elif month == 1 and 6 <= day <= 12 and year == 2026: cal["is_prep_week"] = 1
+    if month == 4 and 1 <= day <= 7 and year == 2026: cal["exam_dentistry"] = 1
+    elif month == 3 and 25 <= day <= 31 and year == 2026: cal["is_prep_week"] = 1
+    if month == 6 and 13 <= day <= 19 and year == 2026: cal["exam_dentistry"] = 1
+    elif month == 6 and 6 <= day <= 12 and year == 2026: cal["is_prep_week"] = 1
+    
+    return cal
 
-    nodes_df = pd.read_csv(nodes_csv_path)
-    demand_df = pd.read_csv(demand_csv_path)
+def calculate_demand(profile, district_name, hour, weather_label, is_weekend, cal):
+    base_demand = profile["base_demand"]
+    hour_multiplier = profile["activity_curve"][hour]
+    weekend_multiplier = profile["weekend_multiplier"] if is_weekend else 1.0
+    weather_multiplier = WEATHER_EFFECTS[weather_label]
+    special_day_multiplier = 1.9 if cal["is_special_day"] else 1.0
+    academic_multiplier = 1.0
 
-    # Sokak düğümlerini bölgelerine göre kategorize et
-    district_pools = cluster_nodes_by_district(nodes_df)
+    if cal["is_semester_break"] or cal["is_summer_break"]:
+        academic_multiplier = 0.25 if district_name in ["BALKAN", "AYSEKADIN"] else 0.85
+    else:
+        if district_name in ["BALKAN", "AYSEKADIN"]:
+            if cal["exam_engineering"]: academic_multiplier += 0.6
+            if cal["exam_medicine"]:    academic_multiplier += 0.5
+            if cal["exam_dentistry"]:   academic_multiplier += 0.4
+            if cal["is_prep_week"]:     academic_multiplier += 0.25
+            if hour in [22, 23, 0, 1, 2] and (cal["exam_engineering"] or cal["exam_medicine"] or cal["exam_dentistry"] or cal["is_prep_week"]):
+                academic_multiplier *= 1.35
+        elif district_name == "SARACLAR" and any([cal["exam_engineering"], cal["exam_medicine"], cal["exam_dentistry"], cal["is_prep_week"]]):
+            academic_multiplier = 0.75
+        elif district_name == "KARAAGAC" and any([cal["exam_engineering"], cal["exam_medicine"], cal["exam_dentistry"], cal["is_prep_week"]]):
+            academic_multiplier = 0.50
 
-    simulated_orders = []
-    order_id_counter = 100000
+    spike_multiplier = random.uniform(1.5, 2.2) if random.random() < 0.03 else 1.0
+    demand = (base_demand * hour_multiplier * weekend_multiplier * weather_multiplier * special_day_multiplier * academic_multiplier * spike_multiplier) + np.random.normal(0, 3)
+    return max(0, round(demand))
 
-    print(" Saatlik talepler gerçek sokak koordinatlarına dağıtılıyor...")
-    for _, row in demand_df.iterrows():
-        dt = pd.to_datetime(row["datetime"])
-        district = row["district"]
-        demand_count = int(row["demand"])
-        weather = row["weather_label"]
-        weekend = row["is_weekend"]
+def generate_hourly_demand(weather_df):
+    rows = []
+    print("Gerçek hava durumu verisi üzerinden Edirne Lojistik Zaman Serisi işleniyor...")
+    for _, weather_row in weather_df.iterrows():
+        dt = pd.to_datetime(weather_row["time"])
+        hour = dt.hour
+        weather_label = weather_row["weather_label"]
+        is_weekend = dt.weekday() >= 5
+        cal = get_calendar_features(dt)
 
-        pool = district_pools[district]
-        if not pool:
-            continue  # Eğer o bölgeye ait sokak düğümü bulunamadıysa es geç
-
-        # O saatteki talep sayısı kadar sokak havuzundan rastgele koordinat seçiyoruz
-        # Replace=True: Aynı sokaktan aynı saatte birden fazla sipariş gelebilir (Apartmanlar vb.)
-        chosen_nodes = random.choices(pool, k=demand_count)
-
-        for node in chosen_nodes:
-            # Siparişlerin tam saat başında değil, o saatin içine (0-59 dk) rastsallıkla dağılması !sunum için kritiktir
-            exact_time = dt + timedelta(minutes=random.randint(0, 59), seconds=random.randint(0, 59))
-
-            cal = get_calendar_features(dt)
-            simulated_orders.append({
-                "order_id": f"ORD_{order_id_counter}",
-                "timestamp": exact_time,
-                "district": district,
-                "lat": node[0],
-                "lon": node[1],
-                "weather_label": weather,
-                "is_weekend": weekend,
-                "is_special_day": cal["is_special_day"],
-                "is_semester_break": cal["is_semester_break"],
-                "is_summer_break": cal["is_summer_break"],
-                "is_prep_week": cal["is_prep_week"],
-                "exam_engineering": cal["exam_engineering"],
-                "exam_medicine": cal["exam_medicine"],
-                "exam_dentistry": cal["exam_dentistry"]
+        for district_name, profile in DISTRICT_PROFILES.items():
+            demand = calculate_demand(profile, district_name, hour, weather_label, is_weekend, cal)
+            rows.append({
+                "datetime": dt, "district": district_name, "weather_label": weather_label,
+                "is_weekend": int(is_weekend), "is_special_day": cal["is_special_day"],
+                "is_semester_break": cal["is_semester_break"], "is_summer_break": cal["is_summer_break"],
+                "is_prep_week": cal["is_prep_week"], "exam_engineering": cal["exam_engineering"],
+                "exam_medicine": cal["exam_medicine"], "exam_dentistry": cal["exam_dentistry"],
+                "demand": demand
             })
-
-    # DataFrame oluştur ve kaydet
-    final_orders_df = pd.DataFrame(simulated_orders)
-    final_orders_df.sort_values(by="timestamp", inplace=True)
-
-    # Çıktı klasörünü kontrol et
-    os.makedirs(os.path.dirname(output_csv_path), exist_ok=True)
-    final_orders_df.to_csv(output_csv_path, index=False)
-
-    print(f" Başarılı! Toplam {len(final_orders_df)} adet tekil sipariş üretildi.")
-    print(f" Dosya konumu: {output_csv_path}")
-
-
-if __name__ == "__main__":
-    sample_individual_orders(
-        demand_csv_path=("../data/hourly_demand.csv"),
-        nodes_csv_path=("../data/edirne_nodes.csv"),
-        output_csv_path=os.path.join("../data/simulated_orders.csv")
-    )
+    return pd.DataFrame(rows)

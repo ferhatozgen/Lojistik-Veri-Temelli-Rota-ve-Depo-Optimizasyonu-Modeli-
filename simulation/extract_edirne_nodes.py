@@ -1,68 +1,111 @@
-import osmnx as ox
-import pandas as pd
 import os
-import math
-from src.utils import haversine
+import sys
+import pandas as pd
+import random
+from datetime import timedelta
 
+ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+sys.path.append(ROOT_DIR)
 
-# Kritik lokasyonları buraya da ekliyoruz ki filtreleme yapabilelim
-LOCATIONS = {
-    "CENTER_SELIMIYE": (41.6772, 26.5567),    # Şehir Merkezi
-    "MERIC_BRIDGE": (41.663358, 26.552126), # Köprü Darboğazı
-    "TUNCA_BRIDGE": (41.667802, 26.5541),   # Köprü darbogazı
-    "ERASTA_AVM": (41.666047, 26.570551),          # Ticari Merkez
-    "AYSEKADIN_ZUBEYDE": (41.667622, 26.577653),   # Zübeyde Hanım Cad. (Yoğun Trafik)
-    "SANAYI_SITESI": (41.657980, 26.580567),       # Lojistik Girişi
-    "DELTA_DORMS_1": (41.643916, 26.615970),          # Öğrenci Yurtları (Yüksek Sipariş)
-    "SUKRUPASA": (41.667665, 26.597498),
-    "FATIH_MAH": (41.659218, 26.599756),
-    "DELTA_DORMS_2": (41.638264, 26.612267)
-}
+from simulation.order_sampler import get_calendar_features, calculate_demand, cluster_nodes_by_district
+from simulation.district_profiles import DISTRICT_PROFILES
 
-def extract_urban_nodes():
-    print("🗺️ Edirne lojistik ağı indiriliyor ve filtreleniyor...")
+def get_weather_for_date(dt, today_date):
+    """
+    Simülasyon zaman çizgisine göre akıllı hava durumu ataması yapar.
+    - Bugünün öncesi (6 Mayıs - 27 Mayıs arası): Yaşanmış Mayıs normları rastsallığı.
+    - Bugünün sonrası (Gelecek planlaması): 7 günlük lojistik forecast tahmini.
+    """
+    if dt.date() < today_date:
+        return 1 if random.random() < 0.25 else 0
+    else:
+        return 1 if random.random() < 0.20 else 0
 
-    center_point = (41.6772, 26.5567)
-    dist = 5500  # Geniş alanı çek, sonra içinden ayıklayacağız
+def bridge_data_gap_system(target_date_str, today_date_str='2026-05-28'):
+    """
+    Frontend'den gelen hedef tarihe göre veri boşluklarını tespit eder.
+    demand_engine'deki kuralları kullanarak on-the-fly (canlı) onarım yapar.
+    """
+    print("🔄 Kayan Zaman Pencereli Veri Hattı (Data Pipeline) Kontrol Ediliyor...")
 
-    graph = ox.graph_from_point(center_point, dist=dist, network_type='drive')
-    nodes, _ = ox.graph_to_gdfs(graph)
+    demand_path = os.path.join(ROOT_DIR, "data", "hourly_demand.csv")
+    orders_path = os.path.join(ROOT_DIR, "data", "simulated_orders.csv")
+    nodes_path = os.path.join(ROOT_DIR, "data", "edirne_nodes.csv")
 
-    # Düğümleri listeye çeviriyoruz
-    all_nodes = nodes[['y', 'x']].copy()
-    all_nodes.columns = ['lat', 'lon']
+    if not os.path.exists(demand_path) or not os.path.exists(orders_path):
+        print(" Hata: Başlangıç veri setleri (hourly_demand veya simulated_orders) bulunamadı!")
+        print(" Önce ana veri setlerinin oluşturulması gerekiyor.")
+        return
 
-    filtered_nodes = []
+    # 1. Veritabanındaki En Son Tarihi Oku
+    df_demand = pd.read_csv(demand_path)
+    df_demand['datetime'] = pd.to_datetime(df_demand['datetime'])
+    last_recorded_date = df_demand['datetime'].max().date()
 
-    # --- FİLTRELEME MANTIĞI ---
-    for _, node in all_nodes.iterrows():
-        keep_node = False
+    target_date = pd.to_datetime(target_date_str).date()
+    today_date = pd.to_datetime(today_date_str).date()
 
-        for loc_name, loc_coords in LOCATIONS.items():
-            # Filtre mesafesi:
-            # Balkan ve Delta geniş bir alan olduğu için oralarda 1.5 km'lik alanı koru
-            # Şehir merkezinde ise 1.0 km yeterli.
-            limit = 1.5 if "BALKAN" in loc_name or "DELTA" in loc_name else 1.2
-            # Eğer bir sokak düğümü, bizim 7 noktamızdan herhangi birine 1.2 km'den yakınsa tut
-            # Bu sayede 'ıssız' ve 'ilgisiz' yerlerdeki düğümler silinecek
-            if haversine(node['lat'], node['lon'], loc_coords[0], loc_coords[1]) < limit:
-                keep_node = True
-                break
+    # Hedef tarih zaten mevcutsa sistemi yormaya gerek yok
+    if target_date <= last_recorded_date:
+        print(f"✅ Talep edilen tarih ({target_date_str}) veri tabanında mevcut. Doğrudan yükleniyor.")
+        return
 
-        if keep_node:
-            filtered_nodes.append(node)
+    print(f"⚠ Veride Boşluk Saptandı! Son Kayıt: {last_recorded_date} -> Hedef: {target_date}")
+    print(f"⚙ Aradaki günler kurallara göre tıkır tıkır dolduruluyor...")
 
-    nodes_df = pd.DataFrame(filtered_nodes)
+    # Sokak havuzunu ve sipariş ID sayacını hazırla
+    nodes_df = pd.read_csv(nodes_path)
+    district_pools = cluster_nodes_by_district(nodes_df)
 
-    # Klasör kontrolü
-    if not os.path.exists('../data'):
-        os.makedirs('../data')
+    df_orders = pd.read_csv(orders_path)
+    order_id_counter = len(df_orders) + 300000
 
-    nodes_df.to_csv('../data/edirne_nodes.csv', index=False)
+    new_demand_rows = []
+    new_order_rows = []
 
-    print(f"✅ Temizlik Tamamlandı! Gereksiz noktalar elendi.")
-    print(f"📍 Toplam {len(nodes_df)} adet stratejik nokta 'edirne_nodes.csv' dosyasına yazıldı.")
+    current_processing_date = last_recorded_date + timedelta(days=1)
 
+    while current_processing_date <= target_date:
+        for hour in range(24):
+            dt = pd.to_datetime(f"{current_processing_date} {hour:02d}:00:00")
+            weather_label = get_weather_for_date(dt, today_date)
+            is_weekend = dt.weekday() >= 5
+            cal = get_calendar_features(dt)
+
+            for district_name, profile in DISTRICT_PROFILES.items():
+                demand = calculate_demand(profile, district_name, hour, weather_label, is_weekend, cal)
+
+                new_demand_rows.append({
+                    "datetime": dt, "district": district_name, "weather_label": weather_label,
+                    "is_weekend": int(is_weekend), "is_special_day": cal["is_special_day"],
+                    "is_semester_break": cal["is_semester_break"], "is_summer_break": cal["is_summer_break"],
+                    "is_prep_week": cal["is_prep_week"], "exam_engineering": cal["exam_engineering"],
+                    "exam_medicine": cal["exam_medicine"], "exam_dentistry": cal["exam_dentistry"],
+                    "demand": demand
+                })
+
+                pool = district_pools[district_name]
+                if pool and demand > 0:
+                    chosen_nodes = random.choices(pool, k=int(demand))
+                    for node in chosen_nodes:
+                        exact_time = dt + timedelta(minutes=random.randint(0, 59), seconds=random.randint(0, 59))
+                        new_order_rows.append({
+                            "order_id": f"ORD_{order_id_counter}", "timestamp": exact_time,
+                            "district": district_name, "lat": node[0], "lon": node[1],
+                            "weather_label": weather_label, "is_weekend": int(is_weekend),
+                            "is_special_day": cal["is_special_day"], "is_semester_break": cal["is_semester_break"],
+                            "is_summer_break": cal["is_summer_break"], "is_prep_week": cal["is_prep_week"],
+                            "exam_engineering": cal["exam_engineering"], "exam_medicine": cal["exam_medicine"],
+                            "exam_dentistry": cal["exam_dentistry"]
+                        })
+                        order_id_counter += 1
+
+        current_processing_date += timedelta(days=1)
+
+    if new_demand_rows:
+        pd.DataFrame(new_demand_rows).to_csv(demand_path, mode='a', header=False, index=False)
+        pd.DataFrame(new_order_rows).to_csv(orders_path, mode='a', header=False, index=False)
+        print(f"✅ Başarılı! Dosyalar güncellendi. Sistem {target_date_str} tarihine hazır.")
 
 if __name__ == "__main__":
-    extract_urban_nodes()
+    bridge_data_gap_system("2026-05-30")

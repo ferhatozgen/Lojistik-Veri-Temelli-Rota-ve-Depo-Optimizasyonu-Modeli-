@@ -5,14 +5,37 @@ import numpy as np
 from ortools.constraint_solver import routing_enums_pb2
 from ortools.constraint_solver import pywrapcp
 from src.utils import haversine_road_meters
+import math
 
+def haversine_distance(lat1, lon1, lat2, lon2):
+    """İki GPS koordinatı arasındaki mesafeyi kilometre cinsinden hesaplar."""
+    R = 6371.0  # Dünya'nın yarıçapı (km)
+    
+    lat1_rad = math.radians(lat1)
+    lon1_rad = math.radians(lon1)
+    lat2_rad = math.radians(lat2)
+    lon2_rad = math.radians(lon2)
+    
+    dlat = lat2_rad - lat1_rad
+    dlon = lon2_rad - lon1_rad
+    
+    a = math.sin(dlat / 2)**2 + math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(dlon / 2)**2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    
+    return R * c
 
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.append(ROOT_DIR)
 
 
 def create_distance_and_demand_matrices(hub_coords, order_coords):
-    """OR-Tools için mesafe matrisi ve talep dizisini hazırlar."""
+    """OR-Tools için mesafe matrisi ve talep dizisini hazırlar.
+
+    Önemli not: OR-Tools maliyetleri integer ister. Önceki sürüm km cinsinden
+    float mesafeyi int matrise yazdığı için 1 km altındaki yollar 0'a yuvarlanıyordu.
+    Bu da jüri demosunda rotaların gerçekçilik kalitesini bozabilir. Bu sürümde
+    yol eğriliği katsayısı uygulanmış metre değeri kullanılır.
+    """
     all_points = [hub_coords] + list(order_coords)
     num_points = len(all_points)
 
@@ -22,13 +45,61 @@ def create_distance_and_demand_matrices(hub_coords, order_coords):
             if i == j:
                 distance_matrix[i][j] = 0
             else:
-                distance_matrix[i][j] = haversine_distance(
+                distance_matrix[i][j] = haversine_road_meters(
                     all_points[i][0], all_points[i][1],
                     all_points[j][0], all_points[j][1]
                 )
 
     demands = [0] + [1] * (num_points - 1)
     return distance_matrix.tolist(), demands, all_points
+
+
+
+def build_greedy_fallback_routes(hub_id, hub_row, hub_orders, vehicle_capacity):
+    """OR-Tools çok büyük veri üzerinde süre içinde çözüm bulamazsa demo için güvenli rota üretir.
+
+    Bu yöntem optimizasyon iddiası taşımaz; siparişleri hub'a olan mesafeye göre sıralar,
+    araç kapasitesine göre parçalara böler ve her parçayı en yakın komşu mantığıyla dolaştırır.
+    Böylece Streamlit demosu boş harita yerine çalışan bir rota katmanı gösterebilir.
+    """
+    if hub_orders.empty:
+        return []
+
+    hub_lat, hub_lon = float(hub_row['lat']), float(hub_row['lon'])
+    orders = hub_orders.copy().reset_index(drop=True)
+    orders['_depot_dist'] = orders.apply(
+        lambda r: haversine_road_meters(hub_lat, hub_lon, float(r['lat']), float(r['lon'])), axis=1
+    )
+    orders = orders.sort_values('_depot_dist').reset_index(drop=True)
+
+    route_results = []
+    for vehicle_id, start in enumerate(range(0, len(orders), max(1, int(vehicle_capacity)))):
+        chunk = orders.iloc[start:start + max(1, int(vehicle_capacity))].copy().reset_index(drop=True)
+        current_lat, current_lon = hub_lat, hub_lon
+        remaining = chunk.to_dict(orient='records')
+        sequence = [{'order_id': 'DEPOT', 'lat': hub_lat, 'lon': hub_lon}]
+
+        while remaining:
+            next_idx = min(
+                range(len(remaining)),
+                key=lambda i: haversine_road_meters(current_lat, current_lon, float(remaining[i]['lat']), float(remaining[i]['lon']))
+            )
+            nxt = remaining.pop(next_idx)
+            sequence.append({'order_id': nxt.get('order_id', ''), 'lat': float(nxt['lat']), 'lon': float(nxt['lon'])})
+            current_lat, current_lon = float(nxt['lat']), float(nxt['lon'])
+
+        sequence.append({'order_id': 'DEPOT', 'lat': hub_lat, 'lon': hub_lon})
+        for seq_idx, point in enumerate(sequence):
+            route_results.append({
+                'hub_id': hub_id,
+                'vehicle_id': vehicle_id,
+                'sequence_no': seq_idx,
+                'order_id': point['order_id'],
+                'lat': point['lat'],
+                'lon': point['lon'],
+                'solver': 'greedy_fallback'
+            })
+    return route_results
 
 
 def solve_vrp_for_hub(hub_id, hub_row, hub_orders, vehicle_count, vehicle_capacity):
@@ -70,9 +141,9 @@ def solve_vrp_for_hub(hub_id, hub_row, hub_orders, vehicle_count, vehicle_capaci
     )
 
     search_parameters = pywrapcp.DefaultRoutingSearchParameters()
-    search_parameters.first_solution_strategy = routing_enums_pb2.FirstSolutionStrategy.PATH_CHEAPEST_ARC
+    search_parameters.first_solution_strategy = routing_enums_pb2.FirstSolutionStrategy.PARALLEL_CHEAPEST_INSERTION
     search_parameters.local_search_metaheuristic = routing_enums_pb2.LocalSearchMetaheuristic.GUIDED_LOCAL_SEARCH
-    search_parameters.time_limit.seconds = 2
+    search_parameters.time_limit.seconds = 8
 
     solution = routing.SolveWithParameters(search_parameters)
 
@@ -87,8 +158,10 @@ def solve_vrp_for_hub(hub_id, hub_row, hub_orders, vehicle_count, vehicle_capaci
                 node_sequence.append(node_index)
                 index = solution.Value(routing.NextVar(index))
 
-            # Sadece depodan çıkış yapan aktif araçların rotasını kaydet
+            # Sadece depodan çıkış yapan aktif araçların rotasını kaydet.
+            # Rota görsel olarak kapansın diye son depot dönüşünü de ekliyoruz.
             if len(node_sequence) > 1:
+                node_sequence.append(0)
                 for seq_idx, node_id in enumerate(node_sequence):
                     ord_id = "DEPOT" if node_id == 0 else order_ids[node_id - 1]
                     route_results.append({
@@ -97,8 +170,13 @@ def solve_vrp_for_hub(hub_id, hub_row, hub_orders, vehicle_count, vehicle_capaci
                         "sequence_no": seq_idx,
                         "order_id": ord_id,
                         "lat": all_points[node_id][0],
-                        "lon": all_points[node_id][1]
+                        "lon": all_points[node_id][1],
+                        "solver": "ortools_cvrp"
                     })
+    if not route_results:
+        print(f"    OR-Tools süre içinde çözüm bulamadı; demo için greedy fallback rota üretildi.")
+        return build_greedy_fallback_routes(hub_id, hub_row, hub_orders, vehicle_capacity)
+
     return route_results
 
 

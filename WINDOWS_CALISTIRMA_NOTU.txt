@@ -1,0 +1,11 @@
+Windows kurulum notu:
+
+Eğer pip install -r requirements.txt sırasında D:\bld\...\work gibi bir hata alırsanız, requirements dosyası ortam yolu içeren bozuk/frozen bir dosya olarak kalmış demektir.
+
+Terminalde proje klasöründe şu komutları deneyin:
+
+python -m pip install --upgrade pip
+python -m pip install --no-cache-dir -r requirements.txt
+streamlit run app.py
+
+Uygulama açılıp OR-Tools rota üretmezse bu sürümde güvenli fallback rota üretimi eklidir; harita boş kalmamalıdır.
