@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense, Dropout, Input
 from tensorflow.keras.callbacks import EarlyStopping
+import joblib
 
 # Proje kök dizinini dinamik olarak sisteme tanıtıyoruz
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -18,7 +19,12 @@ def train_forecasting_brain():
     print("-" * 50)
 
     demand_path = os.path.join(ROOT_DIR, "data", "hourly_demand.csv")
-    X, y, feature_cols, district_cols = prepare_multi_output_lstm_data(demand_path, n_steps=24)
+    X, y, feature_cols, district_cols, scaler = prepare_multi_output_lstm_data(demand_path, n_steps=24)
+
+    scaler_save_path = os.path.join(models_dir, "lstm_scaler.pkl")
+    joblib.dump(scaler, scaler_save_path)
+    print(f" Scaler '{scaler_save_path}' konumuna kaydedildi.")
+
 
     # Veriyi Kronolojik Olarak Bölme (%80 Eğitme - %20 Test)
     # Zaman serilerinde random split yapılmaz, geçmişle eğitip gelecekle test etmeliyiz!

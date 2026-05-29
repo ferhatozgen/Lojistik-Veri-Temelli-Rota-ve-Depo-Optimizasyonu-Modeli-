@@ -4,20 +4,10 @@ import pandas as pd
 import numpy as np
 import random
 from datetime import timedelta
-
 from simulation.district_profiles import DISTRICT_PROFILES
+from src.utils import haversine
+from simulation.demand_engine import get_calendar_features
 
-
-def haversine(lat1, lon1, lat2, lon2):
-    """İki coğrafi koordinat arası mesafeyi km cinsinden hesaplar."""
-    R = 6371.0
-    phi1, phi2 = np.radians(lat1), np.radians(lat2)
-    delta_phi = np.radians(lat2 - lat1)
-    delta_lambda = np.radians(lon2 - lon1)
-
-    a = np.sin(delta_phi / 2.0) ** 2 + np.cos(phi1) * np.cos(phi2) * np.sin(delta_lambda / 2.0) ** 2
-    c = 2.0 * np.arctan2(np.sqrt(a), np.sqrt(1.0 - a))
-    return R * c
 
 
 def cluster_nodes_by_district(nodes_df):
@@ -44,7 +34,7 @@ def cluster_nodes_by_district(nodes_df):
 
 
 def sample_individual_orders(demand_csv_path, nodes_csv_path, output_csv_path):
-    print("📦 Sipariş Üretim Fabrikası çalıştırılıyor...")
+    print(" Sipariş Üretim Fabrikası çalıştırılıyor...")
 
     # Verileri yükle
     if not os.path.exists(nodes_csv_path) or not os.path.exists(demand_csv_path):
@@ -80,6 +70,7 @@ def sample_individual_orders(demand_csv_path, nodes_csv_path, output_csv_path):
             # Siparişlerin tam saat başında değil, o saatin içine (0-59 dk) rastsallıkla dağılması !sunum için kritiktir
             exact_time = dt + timedelta(minutes=random.randint(0, 59), seconds=random.randint(0, 59))
 
+            cal = get_calendar_features(dt)
             simulated_orders.append({
                 "order_id": f"ORD_{order_id_counter}",
                 "timestamp": exact_time,
@@ -87,9 +78,15 @@ def sample_individual_orders(demand_csv_path, nodes_csv_path, output_csv_path):
                 "lat": node[0],
                 "lon": node[1],
                 "weather_label": weather,
-                "is_weekend": weekend
+                "is_weekend": weekend,
+                "is_special_day": cal["is_special_day"],
+                "is_semester_break": cal["is_semester_break"],
+                "is_summer_break": cal["is_summer_break"],
+                "is_prep_week": cal["is_prep_week"],
+                "exam_engineering": cal["exam_engineering"],
+                "exam_medicine": cal["exam_medicine"],
+                "exam_dentistry": cal["exam_dentistry"]
             })
-            order_id_counter += 1
 
     # DataFrame oluştur ve kaydet
     final_orders_df = pd.DataFrame(simulated_orders)
