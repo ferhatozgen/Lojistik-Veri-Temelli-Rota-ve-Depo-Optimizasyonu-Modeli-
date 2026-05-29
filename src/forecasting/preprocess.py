@@ -3,7 +3,6 @@ import sys
 import pandas as pd
 import numpy as np
 from sklearn.preprocessing import MinMaxScaler
-import joblib
 
 
 def prepare_multi_output_lstm_data(demand_csv_path, n_steps=24):
@@ -40,8 +39,8 @@ def prepare_multi_output_lstm_data(demand_csv_path, n_steps=24):
     # İki tabloyu zaman indeksine göre birleştiriyoruz
     final_df = df_pivot.join(df_meta).fillna(0)
 
-    #  KRİTİK MÜHENDİSLİK: Sütun sıralamasını alfabetik olarak sabitliyoruz.
-    # Bu sıralama yarın canlı simülasyonda modelin şaşırmasını engelleyecek.
+    #Sütun sıralamasını alfabetik olarak sabitliyoruz.
+    # Bu sıralama yarın canlı simülasyonda modelin şaşırmasını engelleyecekmiş.
     target_cols = sorted(list(df_pivot.columns))  # ['AYSEKADIN', 'BALKAN', 'KARAAGAC', 'SARACLAR', 'SUKRUPASA']
     meta_cols = [
         'weather_label', 'is_weekend', 'is_special_day',
@@ -55,11 +54,6 @@ def prepare_multi_output_lstm_data(demand_csv_path, n_steps=24):
     scaler = MinMaxScaler(feature_range=(0, 1))
     scaled_data = scaler.fit_transform(final_df[feature_cols])
 
-    # Ölçekleyiciyi saklıyoruz (Aşama 3 ve 4'te tahmin edilen veriyi gerçeğe dönüştürmek için gerekecek)
-    models_dir = ("../../models/saved")
-    os.makedirs(models_dir, exist_ok=True)
-    joblib.dump(scaler, "../../models/saved/lstm_scaler.pkl")
-
     # 5. Kayan Zaman Penceresi (Sliding Window) Oluşturma: DÜZ TABLOYU YSA NIN ANLAYACAĞI 3D Küpe çevirir
     X, y = [], []
     n_districts = len(target_cols)
@@ -71,7 +65,7 @@ def prepare_multi_output_lstm_data(demand_csv_path, n_steps=24):
         # Çıkış (y): Bir sonraki saatin (25. saat) SADECE 5 mahalledeki kargo talep sayıları
         y.append(scaled_data[i + n_steps, :n_districts])
 
-    return np.array(X), np.array(y), feature_cols, target_cols
+    return np.array(X), np.array(y), feature_cols, target_cols, scaler
 
 
 if __name__ == "__main__":

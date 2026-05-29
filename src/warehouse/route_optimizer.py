@@ -4,25 +4,11 @@ import pandas as pd
 import numpy as np
 from ortools.constraint_solver import routing_enums_pb2
 from ortools.constraint_solver import pywrapcp
+from src.utils import haversine_road_meters
 
 
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.append(ROOT_DIR)
-
-
-def haversine_distance(lat1, lon1, lat2, lon2):
-    """İki koordinat arasındaki mesafeyi yol eğrilik çarpanı (1.3) ile hesaplar."""
-    R = 6371000  # Dünya yarıçapı (metre)
-    phi1 = np.radians(lat1)
-    phi2 = np.radians(lat2)
-    delta_phi = np.radians(lat2 - lat1)
-    delta_lambda = np.radians(lon2 - lon1)
-
-    a = np.sin(delta_phi / 2) ** 2 + np.cos(phi1) * np.cos(phi2) * np.sin(delta_lambda / 2) ** 2
-    c = 2 * np.arctan2(np.sqrt(a), np.sqrt(1 - a))
-
-    # 1.3 Yol Eğrilik Katsayısı (Edirne sokak simülasyonu için)
-    return int(R * c * 1.3)
 
 
 def create_distance_and_demand_matrices(hub_coords, order_coords):
@@ -162,9 +148,11 @@ def run_route_optimization_engine(user_vehicle_capacity=25, manual_courier_extra
     if all_optimized_routes:
         df_routes = pd.DataFrame(all_optimized_routes)
         df_routes.to_csv(output_path, index=False)
-        print(f" Rotalar Çizildi! Günlük kurye planı '{output_path}' dosyasına kaydedildi.")
-    else:
-        print(" Uyarı: Uygun bir rota planı üretilemedi.")
+        print(f" Rotalar Çizildi! '{output_path}' dosyasına kaydedildi.")
+        return df_routes.to_dict(orient="records")
+
+    print(" Uyarı: Uygun bir rota planı üretilemedi.")
+    return []
 
 
 if __name__ == "__main__":

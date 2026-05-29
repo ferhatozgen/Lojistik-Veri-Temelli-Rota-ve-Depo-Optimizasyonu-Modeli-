@@ -1,7 +1,6 @@
 import os
 import sys
 import pandas as pd
-import numpy as np
 import random
 from datetime import timedelta
 
@@ -9,7 +8,8 @@ ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.append(ROOT_DIR)
 
 from simulation.demand_engine import get_calendar_features, calculate_demand
-from data.order_sampler import cluster_nodes_by_district
+from simulation.order_sampler import cluster_nodes_by_district
+from simulation.district_profiles import DISTRICT_PROFILES
 
 
 def get_weather_for_date(dt, today_date):
@@ -26,7 +26,7 @@ def get_weather_for_date(dt, today_date):
         return 1 if random.random() < 0.20 else 0
 
 
-def bridge_data_gap_system(target_date_str):
+def bridge_data_gap_system(target_date_str, today_date_str='2026-05-28'):
     """
     Frontend'den gelen hedef tarihe göre veri boşluklarını tespit eder.
     demand_engine'deki kuralları kullanarak on-the-fly (canlı) onarım yapar.
@@ -47,7 +47,7 @@ def bridge_data_gap_system(target_date_str):
     last_recorded_date = df_demand['datetime'].max().date()
 
     target_date = pd.to_datetime(target_date_str).date()
-    today_date = pd.to_datetime("2026-05-28").date()  # Simülasyonun 'Bugün' kabul ettiği milat
+    today_date = pd.to_datetime(today_date_str).date()  # Simülasyonun 'Bugün' kabul ettiği milat
 
     # Hedef tarih zaten mevcutsa sistemi yormaya gerek yok
     if target_date <= last_recorded_date:
@@ -81,7 +81,7 @@ def bridge_data_gap_system(target_date_str):
 
             cal = get_calendar_features(dt)
 
-            from simulation.district_profiles import DISTRICT_PROFILES
+
             for district_name, profile in DISTRICT_PROFILES.items():
                 # Senin yazdığın demand denklemi çalışıyor
                 demand = calculate_demand(profile, district_name, hour, weather_label, is_weekend, cal)

@@ -2,6 +2,8 @@ import osmnx as ox
 import pandas as pd
 import os
 import math
+from src.utils import haversine
+
 
 # Kritik lokasyonları buraya da ekliyoruz ki filtreleme yapabilelim
 LOCATIONS = {
@@ -11,19 +13,11 @@ LOCATIONS = {
     "ERASTA_AVM": (41.666047, 26.570551),          # Ticari Merkez
     "AYSEKADIN_ZUBEYDE": (41.667622, 26.577653),   # Zübeyde Hanım Cad. (Yoğun Trafik)
     "SANAYI_SITESI": (41.657980, 26.580567),       # Lojistik Girişi
-    "DELTA_DORMS": (41.643916, 26.615970),          # Öğrenci Yurtları (Yüksek Sipariş)
+    "DELTA_DORMS_1": (41.643916, 26.615970),          # Öğrenci Yurtları (Yüksek Sipariş)
     "SUKRUPASA": (41.667665, 26.597498),
     "FATIH_MAH": (41.659218, 26.599756),
-    "DELTA_DORMS": (41.638264, 26.612267)
+    "DELTA_DORMS_2": (41.638264, 26.612267)
 }
-
-
-def haversine(lat1, lon1, lat2, lon2):
-    R = 6371
-    dlat, dlon = math.radians(lat2 - lat1), math.radians(lon2 - lon1)
-    a = math.sin(dlat / 2) ** 2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2
-    return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-
 
 def extract_urban_nodes():
     print("🗺️ Edirne lojistik ağı indiriliyor ve filtreleniyor...")
@@ -51,7 +45,7 @@ def extract_urban_nodes():
             limit = 1.5 if "BALKAN" in loc_name or "DELTA" in loc_name else 1.2
             # Eğer bir sokak düğümü, bizim 7 noktamızdan herhangi birine 1.2 km'den yakınsa tut
             # Bu sayede 'ıssız' ve 'ilgisiz' yerlerdeki düğümler silinecek
-            if haversine(node['lat'], node['lon'], loc_coords[0], loc_coords[1]) < 1.2:
+            if haversine(node['lat'], node['lon'], loc_coords[0], loc_coords[1]) < limit:
                 keep_node = True
                 break
 

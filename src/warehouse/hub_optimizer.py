@@ -6,57 +6,11 @@ from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
 import joblib
 from tensorflow.keras.models import load_model
+from src.forecasting.inference import get_next_day_predictions
+
 
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.append(ROOT_DIR)
-
-
-def get_next_day_predictions_dynamic(target_date_str):
-    """
-    Belirlenen hedef tarihten önceki 24 saatin verilerine bakarak
-    LSTM modeliyle o günün mahalle bazlı paket tahminlerini üretir.
-    """
-    model_path = os.path.join(ROOT_DIR, "models", "saved", "delivery_demand_lstm.h5")
-    scaler_path = os.path.join(ROOT_DIR, "models", "saved", "lstm_scaler.pkl")
-    demand_path = os.path.join(ROOT_DIR, "data", "hourly_demand.csv")
-
-    model = load_model(model_path)
-    scaler = joblib.load(scaler_path)
-    df = pd.read_csv(demand_path)
-
-    df['datetime'] = pd.to_datetime(df['datetime'])
-    target_dt = pd.to_datetime(target_date_str)
-
-    # Hedef tarihten önceki son 24 saatin verisini filtrele
-    past_24h_df = df[df['datetime'] < target_dt].tail(120)  # 5 bölge x 24 saat = 120 satır
-
-    df_pivot = past_24h_df.pivot(index='datetime', columns='district', values='demand').fillna(0)
-    df_meta = past_24h_df.groupby('datetime').agg({
-        'weather_label': 'max', 'is_weekend': 'max', 'is_special_day': 'max',
-        'is_semester_break': 'max', 'is_summer_break': 'max', 'is_prep_week': 'max',
-        'exam_engineering': 'max', 'exam_medicine': 'max', 'exam_dentistry': 'max'
-    })
-    final_df = df_pivot.join(df_meta).fillna(0)
-
-    district_cols = sorted(list(df_pivot.columns))
-    feature_cols = district_cols + list(df_meta.columns)
-
-    last_24h_matrix = final_df[feature_cols].values
-    last_24h_scaled = scaler.transform(last_24h_matrix)
-    X_input = np.expand_dims(last_24h_scaled, axis=0)
-
-    pred_scaled = model.predict(X_input)
-
-
-    # GERİ ÖLÇEKLEME(INVERSE TRANSFORM) YAPILIYOR
-    #ölçekleme işlemi 14 sütun için yapıldı o yüzden biz ona doğrudan bu district_col verirsek(5 sutun) hata verir ondan dummy matris olusturduk.
-    dummy_matrix = np.zeros((1, len(feature_cols)))   #tamamen sıfırlardan olusan 1,14 luk bir matris olusturuyoruz
-    dummy_matrix[0, :len(district_cols)] = pred_scaled[0] #bu 0 elemanlarının bulundupu matrise dağılım bolge sayısı kadar(5) kısmına modellerin bolgesel paket tahminlerini ekliyoruz
-    pred_actual = scaler.inverse_transform(dummy_matrix)[0, :len(district_cols)]  # bu 5 bolge için yazılan paket tahmin değerleri ölçekli şekildeydi o yüzdem geri ölçekleme ile asıl değerlere ulaştık
-
-    # Negatif değerleri temizle ve bölge ve paket sayılarını sözlük olarak dön
-    return {district_cols[i]: max(0, round(pred_actual[i])) for i in range(len(district_cols))}
-
 
 def optimize_temporary_hubs_flexible(target_date_str, user_hub_capacity):
     """
@@ -67,7 +21,7 @@ def optimize_temporary_hubs_flexible(target_date_str, user_hub_capacity):
     print(f"🎛️ Yönetici Paneli Girişi -> Kullanıcı Tarafından Seçilen Hub Kapasitesi: {user_hub_capacity} Paket")
 
     # 1. LSTM Tahmin Adımı
-    predicted_demands = get_next_day_predictions_dynamic(target_date_str)
+    predicted_demands = get_next_day_predictions(target_date_str)
     total_predicted_packages = sum(predicted_demands.values())
 
     # Dinamik K Değeri Hesaplama (Üst sınır kaldırıldı)
@@ -108,8 +62,18 @@ def optimize_temporary_hubs_flexible(target_date_str, user_hub_capacity):
     hubs_df.to_csv(os.path.join(ROOT_DIR, "data", "active_hubs.csv"), index=True)
     day_orders.to_csv(os.path.join(ROOT_DIR, "data", "orders_with_hubs.csv"), index=False)
 
-    print(f"✅ Dağıtım Haritası Güncellendi. {calculated_k} adet geçici hub Edirne sokaklarına konumlandırıldı.")
-    return calculated_k, score
+    print(f"✅ Dağıtım Haritası Güncellendi. {calculated_k} adet geçici hub Edirne sokaklarına konumlandırıldı."),
+
+    result = {
+        "target_date": target_date_str,
+        "total_predicted_packages": total_predicted_packages,
+        "hub_count": calculated_k,
+        "silhouette_score": round(score, 4),
+        "predicted_demands": predicted_demands,
+        "hubs": hubs_df.reset_index().to_dict(orient="records")
+    }
+
+    return result
 
 
 if __name__ == "__main__":
