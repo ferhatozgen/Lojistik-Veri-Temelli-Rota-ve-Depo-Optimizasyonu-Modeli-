@@ -11,7 +11,8 @@ import folium
 import numpy as np
 import pandas as pd
 import streamlit as st
-from streamlit_folium import st_folium
+import streamlit.components.v1 as components
+# from streamlit_folium import st_folium  # Zoom/pan sırasında Streamlit rerun tetiklediği için kullanılmıyor.
 
 ROOT_DIR = os.path.abspath(os.path.dirname(__file__))
 sys.path.append(ROOT_DIR)
@@ -28,6 +29,23 @@ else:
 
 EDIRNE_CENTER = [41.6772, 26.5567]
 DATA_DIR = os.path.join(ROOT_DIR, "data")
+
+
+def render_folium_map(map_obj, height: int = 500):
+    """
+    Folium haritasını Streamlit'e statik HTML component olarak gömer.
+    Bu yöntemle haritada zoom/pan yapılınca Streamlit tekrar çalışmaz;
+    sadece sidebar/slider/button gibi Streamlit widget'ları sayfayı günceller.
+    """
+    if map_obj is None:
+        st.info("Harita üretilemedi.")
+        return
+
+    components.html(
+        map_obj.get_root().render(),
+        height=height,
+        scrolling=False,
+    )
 
 st.set_page_config(
     page_title="Edirne Lojistik Operasyon Merkezi",
@@ -244,7 +262,7 @@ map_col, pool_col = st.columns(2)
 with map_col:
     st.markdown("<span class='live-pill'>08:00 Aktif Dağıtım</span>", unsafe_allow_html=True)
     st.markdown("#### Bugünün optimize edilmiş rota ağı")
-    st_folium(build_active_distribution_map(hub_data, route_data), width="100%", height=520, key="active_distribution_map")
+    render_folium_map(build_active_distribution_map(hub_data, route_data), height=520)
 
 with pool_col:
     st.markdown("<span class='live-pill'>Canlı Sipariş Havuzu</span>", unsafe_allow_html=True)
@@ -252,7 +270,7 @@ with pool_col:
     live_hour = st.slider("Canlı akış saati", min_value=0, max_value=23, value=min(23, now.hour), step=1)
     tomorrow_date = target_date + timedelta(days=1)
     live_map, live_orders = build_live_pool_map(tomorrow_date, live_hour)
-    st_folium(live_map, width="100%", height=470, key="live_pool_map")
+    render_folium_map(live_map, height=470)
     st.caption(f"{tomorrow_date.strftime('%d.%m.%Y')} havuzunda saat {live_hour:02d}:59'a kadar görünen sipariş: {len(live_orders)}")
 
 summary_col, detail_col = st.columns([1, 1])
