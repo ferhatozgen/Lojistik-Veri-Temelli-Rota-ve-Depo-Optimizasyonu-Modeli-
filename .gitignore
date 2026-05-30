@@ -10,5 +10,5 @@ data/*.npy
 data/edirne_center_graph.graphml
 src/analysis/cache/
 src/analysis/results/
-
+scripts/
 
