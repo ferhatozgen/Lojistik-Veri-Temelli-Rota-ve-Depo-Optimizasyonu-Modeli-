@@ -74,17 +74,18 @@ def compute_hubs_for_orders(orders: pd.DataFrame, hub_capacity: int) -> tuple[pd
     if orders.empty or "lat" not in orders.columns:
         return pd.DataFrame(columns=["hub_id", "lat", "lon"]), orders
 
-    coords = orders[["lat", "lon"]].dropna().values
+    orders_clean = orders.dropna(subset=["lat", "lon"]).reset_index(drop=True)
+    coords = orders_clean[["lat", "lon"]].values
     if len(coords) == 0:
         return pd.DataFrame(columns=["hub_id", "lat", "lon"]), orders
 
-    k = max(1, int(np.ceil(len(orders) / hub_capacity)))
-    k = min(k, len(coords))  # k > nokta sayısı olamaz
+    k = max(1, int(np.ceil(len(orders_clean) / hub_capacity)))
+    k = min(k, len(coords))
 
     kmeans = KMeans(n_clusters=k, init="k-means++", n_init=10, random_state=42)
     labels = kmeans.fit_predict(coords)
 
-    orders_out = orders.copy()
+    orders_out = orders_clean.copy()
     orders_out["assigned_hub"] = labels
 
     hubs_df = pd.DataFrame(kmeans.cluster_centers_, columns=["lat", "lon"])

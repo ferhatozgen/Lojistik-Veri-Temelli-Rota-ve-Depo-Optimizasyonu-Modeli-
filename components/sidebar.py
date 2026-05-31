@@ -11,9 +11,10 @@ import pandas as pd
 import numpy as np
 from datetime import date, timedelta
 
-SIM_TODAY = date(2026, 5, 6)
+from datetime import datetime
+SIM_TODAY = date.today()
 DATA_MIN  = date(2025, 1, 1)
-DATA_MAX  = date(2026, 5, 30)
+DATA_MAX  = date.today()
 
 
 def render_sidebar(data: dict):
@@ -58,10 +59,21 @@ def render_sidebar(data: dict):
         if mode == "past":
             st.markdown("""
             <div style="background:#1a2e1a;border:1px solid #166534;border-radius:6px;
-                        padding:8px 12px;margin:8px 0 20px 0;font-size:0.72rem;
+                        padding:8px 12px;margin:8px 0 12px 0;font-size:0.72rem;
                         color:#4ade80;font-family:'IBM Plex Mono',monospace;">
               ✓ Raporlama Modu — Gerçek veriler
             </div>""", unsafe_allow_html=True)
+            if st.button("🔴 Canlı Moda Dön", use_container_width=True):
+                st.session_state.selected_date   = date.today()
+                st.session_state.mode            = "today"
+                st.session_state.sim_running     = False
+                st.session_state.sim_done        = False
+                st.session_state.sim_hour        = 0
+                st.session_state.orders_pool     = []
+                st.session_state.new_order_ids   = set()
+                st.session_state.prev_pool_ids   = set()
+                st.session_state._sim_day_orders = []
+                st.rerun()
         elif mode == "today":
             st.markdown("""
             <div style="background:#1a1a2e;border:1px solid #1e40af;border-radius:6px;
@@ -135,7 +147,7 @@ def _render_capacity_controls(data: dict):
     st.markdown(_label("🏭 Hub İşleme Kapasitesi"), unsafe_allow_html=True)
     hub_cap = st.slider(
         "Hub kapasitesi",
-        min_value=100, max_value=500,
+        min_value=100, max_value=1000,
         value=st.session_state.hub_capacity,
         step=50, format="%d paket",
         label_visibility="collapsed",
@@ -156,7 +168,7 @@ def _render_capacity_controls(data: dict):
     st.markdown(_label("🚐 Araç Taşıma Kapasitesi"), unsafe_allow_html=True)
     vehicle_cap = st.slider(
         "Araç kapasitesi",
-        min_value=10, max_value=60,
+        min_value=10, max_value=100,
         value=st.session_state.vehicle_capacity,
         step=5, format="%d paket",
         label_visibility="collapsed",
@@ -170,7 +182,7 @@ def _render_capacity_controls(data: dict):
     chosen_couriers = st.slider(
         "Kurye sayısı",
         min_value=min_c,
-        max_value=min_c + 6,
+        max_value=min_c + 4,
         value=max(st.session_state.get("chosen_couriers", min_c), min_c),
         step=1, format="%d kurye",
         label_visibility="collapsed",

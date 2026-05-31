@@ -156,7 +156,7 @@ def init_state():
         "hub_capacity":      200,
         "vehicle_capacity":  20,
         "chosen_couriers":   4,
-        "selected_date":     date(2026, 5, 6),
+        "selected_date":     date.today(),
         "mode":              "today",
         "sim_hour":          0,
         "sim_running":       False,
@@ -175,7 +175,7 @@ def init_state():
 
 init_state()
 
-SIM_TODAY = date(2026, 5, 6)
+SIM_TODAY = date.today()
 
 # ── Veri Yükleme ───────────────────────────────────────────────────────────────
 @st.cache_data(show_spinner="Veriler yükleniyor...")
@@ -288,8 +288,14 @@ if mode in ("today", "future"):
     with ctrl1:
         if st.button("▶ Başlat", width="stretch",
                      disabled=st.session_state.sim_running):
-            # Seçilen günün siparişlerini yükle (cache'li değil, günlük çekiyor)
+            # Seçilen günün siparişlerini yükle
             day_orders_df = get_orders_for_date(sel_date)
+            # Bugün için veri yoksa (simülasyon verisi geçmişe kadar) son mevcut güne fallback
+            if day_orders_df.empty:
+                all_o = data.get("all_orders", pd.DataFrame())
+                if not all_o.empty and "date" in all_o.columns:
+                    last_date = all_o["date"].max()
+                    day_orders_df = all_o[all_o["date"] == last_date].copy()
             st.session_state._sim_day_orders = day_orders_df.to_dict("records") \
                 if not day_orders_df.empty else []
             st.session_state.sim_running    = True
@@ -298,11 +304,13 @@ if mode in ("today", "future"):
             st.session_state.orders_pool    = []
             st.session_state.new_order_ids  = set()
             st.session_state.prev_pool_ids  = set()
+            st.rerun()
 
     with ctrl2:
         if st.button("⏸ Durdur", width="stretch",
                      disabled=not st.session_state.sim_running):
             st.session_state.sim_running = False
+            st.rerun()
 
     with ctrl3:
         if st.button("↺ Sıfırla", width="stretch"):
@@ -313,6 +321,7 @@ if mode in ("today", "future"):
             st.session_state.new_order_ids  = set()
             st.session_state.prev_pool_ids  = set()
             st.session_state._sim_day_orders = []
+            st.rerun()
 
     with ctrl4:
         # Sol haritayı güncelle (simülasyon bittikten sonra aktif)
@@ -336,9 +345,17 @@ if mode in ("today", "future"):
             if st.session_state.sim_hour > 0 else 0
         status_txt = "▶ ÇALIŞIYOR" if st.session_state.sim_running else \
                      ("✓ TAMAMLANDI" if st.session_state.sim_done else "⏸ BEKLIYOR")
+        # Hangi günün simüle edildiğini göster
+        sim_orders = st.session_state.get("_sim_day_orders", [])
+        if sim_orders:
+            import pandas as _pd2
+            _df_s = _pd2.DataFrame(sim_orders[:1])
+            sim_date_str = str(_df_s["timestamp"].iloc[0])[:10] if "timestamp" in _df_s.columns else str(sel_date)
+        else:
+            sim_date_str = str(sel_date)
         st.markdown(f"""
         <div class="sim-clock">
-          ⏱ {st.session_state.sim_hour:02d}:00 — {progress_pct}%&nbsp; {status_txt}
+          ⏱ {st.session_state.sim_hour:02d}:00 — {progress_pct}%&nbsp; {status_txt}&nbsp;·&nbsp;{sim_date_str}
         </div>
         """, unsafe_allow_html=True)
 
