@@ -36,14 +36,23 @@ def render_sidebar(data: dict):
         # ── Tarih Seçici ──────────────────────────────────────────────────────
         st.markdown(_label("📅 Simülasyon Tarihi"), unsafe_allow_html=True)
 
-        selected = st.date_input(
+        def _on_date_change():
+            st.session_state.selected_date = st.session_state._date_picker
+
+        # _date_picker key'i ilk kez oluşturuluyorsa selected_date ile eşitle
+        if "_date_picker" not in st.session_state:
+            st.session_state._date_picker = st.session_state.selected_date
+
+        st.date_input(
             label="Tarih",
-            value=st.session_state.selected_date,
             min_value=DATA_MIN,
             max_value=DATA_MAX,
+            format="DD/MM/YYYY",
+            key="_date_picker",
+            on_change=_on_date_change,
             label_visibility="collapsed",
         )
-        st.session_state.selected_date = selected
+        selected = st.session_state.selected_date
 
         # Mod belirleme
         if selected < SIM_TODAY:
@@ -154,7 +163,12 @@ def _render_capacity_controls(data: dict):
     )
     st.session_state.hub_capacity = hub_cap
 
-    n_hubs = max(1, int(np.ceil(total_orders / hub_cap)))
+    # Gerçek hub sayısı: _computed_hubs varsa ondan al
+    _ch = st.session_state.get("_computed_hubs")
+    if _ch is not None and not _ch.empty:
+        n_hubs = len(_ch)
+    else:
+        n_hubs = max(1, int(np.ceil(total_orders / hub_cap)))
 
     col_a, col_b = st.columns(2)
     with col_a:

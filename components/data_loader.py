@@ -55,6 +55,7 @@ def load_simulated_orders() -> pd.DataFrame:
     return df
 
 
+
 def get_orders_for_date(target_date: date) -> pd.DataFrame:
     """Belirli bir tarih için sipariş verilerini döner."""
     all_orders = load_simulated_orders()
@@ -107,13 +108,13 @@ def load_all_data(hub_capacity: int = 200) -> dict:
     data["all_orders"] = all_orders
 
     # ── Bugün için siparişler + hub hesaplama ────────────────────────────────
+    # Not: bridge_data_gap_system app.py'de çağrılarak bugün/dün verisi önceden üretilir
     today_orders = get_orders_for_date(SIM_TODAY)
 
     # Önceki gün → sol harita için (bugün'ün hub'ları önceki günden kurulur)
     prev_date = SIM_TODAY - timedelta(days=1)
     prev_orders = get_orders_for_date(prev_date)
 
-    # Eğer önceki gün yok fallback: bugünün ilk yarısı
     if prev_orders.empty:
         prev_orders = today_orders.copy()
 

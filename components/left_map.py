@@ -53,9 +53,12 @@ def render_left_map(data: dict, mode: str):
         cached_cap = st.session_state.get("_last_hub_cap", None)
         if cached_cap != hub_capacity or hubs.empty:
             from datetime import timedelta
+            import pandas as _pd_lm
+
+            # Sol harita = selected_date'in bir önceki günü
+            # (bridge_data_gap_system her iki günün verisini de üretmiş olur)
             prev_date = selected_date - timedelta(days=1)
             hubs, prev_orders = reload_hubs(all_orders, prev_date, hub_capacity)
-            # prev_orders boşsa today'in kendisini kullan
             if prev_orders.empty:
                 hubs, prev_orders = compute_hubs_for_orders(
                     all_orders[all_orders["date"] == selected_date].copy() if not all_orders.empty else pd.DataFrame(),

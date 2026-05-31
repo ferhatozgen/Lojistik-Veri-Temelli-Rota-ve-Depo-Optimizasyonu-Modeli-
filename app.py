@@ -28,6 +28,7 @@ GELECEk MOD:
 import streamlit as st
 import pandas as pd
 import time
+from simulation.data_pipeline import bridge_data_gap_system
 from datetime import date, timedelta
 
 # Komponent importları
@@ -182,6 +183,15 @@ SIM_TODAY = date.today()
 def get_data(hub_capacity: int) -> dict:
     return load_all_data(hub_capacity=hub_capacity)
 
+# Bugün ve dün için veri yoksa pipeline ile üret
+try:
+    bridge_data_gap_system(
+        target_date_str=str(date.today()),
+        today_date_str=str(date.today())
+    )
+except Exception as _e:
+    pass  # Pipeline hatası uygulamayı durdurmasın
+
 data = get_data(st.session_state.hub_capacity)
 
 # ── Mod Belirleme ──────────────────────────────────────────────────────────────
@@ -288,14 +298,8 @@ if mode in ("today", "future"):
     with ctrl1:
         if st.button("▶ Başlat", width="stretch",
                      disabled=st.session_state.sim_running):
-            # Seçilen günün siparişlerini yükle
+            # Seçilen günün siparişlerini yükle (pipeline zaten üretmiş olmalı)
             day_orders_df = get_orders_for_date(sel_date)
-            # Bugün için veri yoksa (simülasyon verisi geçmişe kadar) son mevcut güne fallback
-            if day_orders_df.empty:
-                all_o = data.get("all_orders", pd.DataFrame())
-                if not all_o.empty and "date" in all_o.columns:
-                    last_date = all_o["date"].max()
-                    day_orders_df = all_o[all_o["date"] == last_date].copy()
             st.session_state._sim_day_orders = day_orders_df.to_dict("records") \
                 if not day_orders_df.empty else []
             st.session_state.sim_running    = True
@@ -341,7 +345,7 @@ if mode in ("today", "future"):
                 st.success(f"Sol harita güncellendi! {len(new_hubs)} hub hesaplandı.")
 
     with ctrl5:
-        progress_pct = int((st.session_state.sim_hour / 23) * 100) \
+        progress_pct = min(100, int((st.session_state.sim_hour / 24) * 100)) \
             if st.session_state.sim_hour > 0 else 0
         status_txt = "▶ ÇALIŞIYOR" if st.session_state.sim_running else \
                      ("✓ TAMAMLANDI" if st.session_state.sim_done else "⏸ BEKLIYOR")
@@ -353,9 +357,14 @@ if mode in ("today", "future"):
             sim_date_str = str(_df_s["timestamp"].iloc[0])[:10] if "timestamp" in _df_s.columns else str(sel_date)
         else:
             sim_date_str = str(sel_date)
+        sel_date_str = str(sel_date)
+        if sim_date_str != sel_date_str:
+            date_note = f" · {sim_date_str} (bugün verisi yok)"
+        else:
+            date_note = f" · {sim_date_str}"
         st.markdown(f"""
         <div class="sim-clock">
-          ⏱ {st.session_state.sim_hour:02d}:00 — {progress_pct}%&nbsp; {status_txt}&nbsp;·&nbsp;{sim_date_str}
+          ⏱ {"23:59" if st.session_state.sim_hour >= 24 else f"{st.session_state.sim_hour:02d}:00"} — {progress_pct}%&nbsp; {status_txt}{date_note}
         </div>
         """, unsafe_allow_html=True)
 

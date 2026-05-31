@@ -39,8 +39,13 @@ def render_metrics(data: dict, mode: str):
 
     else:
         total_orders = metrics.get("total_orders", 0)
-        n_hubs = max(1, int(np.ceil(total_orders / hub_cap)))
-        total_couriers = max(4, n_couriers) * n_hubs
+        # Gerçek hub sayısı: _computed_hubs varsa ondan al, yoksa formülle hesapla
+        _ch = st.session_state.get("_computed_hubs")
+        if _ch is not None and not _ch.empty:
+            n_hubs = len(_ch)
+        else:
+            n_hubs = max(1, int(np.ceil(total_orders / hub_cap)))
+        total_couriers = n_couriers * n_hubs
 
         _metric(cols[0], "Toplam Sipariş",  f"{total_orders:,}",     "simulated_orders.csv", "#e2e8f0")
         _metric(cols[1], "Aktif Hub",        str(n_hubs),             f"Kapasite: {hub_cap}", "#f43f5e")

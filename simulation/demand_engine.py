@@ -2,7 +2,7 @@ import os
 import random
 import numpy as np
 import pandas as pd
-from district_profiles import DISTRICT_PROFILES
+from simulation.district_profiles import DISTRICT_PROFILES
 
 WEATHER_EFFECTS = {
     0: 1.0,  # Açık hava
